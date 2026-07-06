@@ -204,5 +204,118 @@ func (s *Server) sendRequestVote(peerId int, args RequestVoteArgs, reply *Reques
 
 func (s *Server) startLeader() {
 	s.state = Leader
-	// Additional logic for starting leader duties would go here (e.g., sending heartbeats)
+
+	go s.runHeartbeatTimer()
+}
+
+func (s *Server) runHeartbeatTimer() {
+	//First send a heartbeat immediately upon becoming the leader
+	s.broadcastHeartbeats()
+
+	//Then start a ticker to send heartbeats at regular intervals - 50ms
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+
+		s.mu.Lock()
+
+		if s.state != Leader {
+			s.mu.Unlock()
+			return
+		}
+
+		s.mu.Unlock()
+		s.broadcastHeartbeats()
+	}
+
+}
+
+func (s *Server) broadcastHeartbeats() {
+
+	s.mu.Lock()
+
+	args := AppendEntriesArgs{
+		Term:     s.currentTerm,
+		LeaderId: s.serverId,
+	}
+
+	savedCurrentTerm := s.currentTerm
+
+	s.mu.Unlock()
+
+	for _, peerId := range s.peerIds {
+		go func(peer int) {
+			reply := AppendEntriesReply{}
+
+			ok := s.sendAppendEntries(peer, args, &reply)
+
+			if ok {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+
+				// If our state changed while waiting for the reply, we should ignore it
+				if s.state != Leader || s.currentTerm != savedCurrentTerm {
+					return
+				}
+
+				//If the reply's term is greater than our current term, we need to step down to a follower
+				if reply.Term > s.currentTerm {
+					s.currentTerm = reply.Term
+					s.state = Follower
+					s.votedFor = -1
+					return
+				}
+			}
+		}(peerId)
+	}
+
+}
+
+// AppendEntriesArgs represents the arguments for an AppendEntries RPC
+type AppendEntriesArgs struct {
+	Term     int
+	LeaderId int
+}
+
+// AppendEntriesReply represents the reply for an AppendEntries RPC
+type AppendEntriesReply struct {
+	Term    int
+	Success bool
+}
+
+// AppendEntries handles incoming AppendEntries RPCs (heartbeats)
+func (s *Server) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	//If the leader has an older term than the current term, reject the heartbeat
+	if args.Term < s.currentTerm {
+		reply.Term = s.currentTerm
+		reply.Success = false
+		return nil
+	}
+
+	//If the leader has a newer term, update the current term and reset the vote
+	if args.Term > s.currentTerm {
+		s.currentTerm = args.Term
+		s.state = Follower
+		s.votedFor = -1
+	}
+
+	//Reset the timer and ensure we are in the follower state
+	s.lastContact = time.Now()
+	s.state = Follower
+
+	reply.Term = s.currentTerm
+	reply.Success = true
+	return nil
+}
+
+func (s *Server) sendAppendEntries(peerId int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	// Simulate sending the AppendEntries RPC to the peer
+	// In a real implementation, this would involve network communication
+	// For testing purposes, we can assume the RPC is always successful
+	return true
 }

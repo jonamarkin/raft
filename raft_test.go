@@ -98,3 +98,36 @@ func TestRequestVote(t *testing.T) {
 	}
 
 }
+
+func TestFollowerReceivesHeartbeat(t *testing.T) {
+	server := NewServer(1, []int{2, 3, 4})
+	server.currentTerm = 2
+
+	//Scenario where a valid heartbeat is received from the leader
+	args := AppendEntriesArgs{
+		Term:     2,
+		LeaderId: 2,
+	}
+	reply := AppendEntriesReply{}
+	server.AppendEntries(args, &reply)
+
+	if !reply.Success {
+		t.Errorf("Expected heartbeat to be successful, but it failed")
+	}
+	if server.state != Follower {
+		t.Errorf("Expected server state to be Follower after receiving heartbeat, got %v", server.state)
+	}
+
+	//Scenario where a heartbeat is received from an older leader
+	argsOld := AppendEntriesArgs{
+		Term:     1,
+		LeaderId: 3,
+	}
+	replyOld := AppendEntriesReply{}
+	server.AppendEntries(argsOld, &replyOld)
+
+	if replyOld.Success {
+		t.Errorf("Expected heartbeat from older leader to fail, but it succeeded")
+	}
+
+}
