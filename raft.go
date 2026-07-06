@@ -315,8 +315,6 @@ func (s *Server) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply
 
 	//If the leader has an older term than the current term, reject the heartbeat
 	if args.Term < s.currentTerm {
-		reply.Term = s.currentTerm
-		reply.Success = false
 		return nil
 	}
 
@@ -380,8 +378,6 @@ func (s *Server) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (s *Server) sendAppendEntries(peerId int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	// Simulate sending the AppendEntries RPC to the peer
-	// In a real implementation, this would involve network communication
-	// For testing purposes, we can assume the RPC is always successful
+	//We assume the RPC is always successful for testing purposes.
 	return true
 }

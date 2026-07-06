@@ -131,3 +131,76 @@ func TestFollowerReceivesHeartbeat(t *testing.T) {
 	}
 
 }
+
+func TestAppendEntriesLogConsistency(t *testing.T) {
+
+	server := NewServer(1, []int{2, 3, 4})
+	server.currentTerm = 2
+
+	//Setup the server's log with some entries
+	server.log = []LogEntry{
+		{Term: 0, Command: nil},
+		{Term: 1, Command: "x=5"},
+		{Term: 2, Command: "y=10"},
+	}
+
+	//Scenario where the log is too short to match the leader's log
+	argsShortLog := AppendEntriesArgs{
+		Term:         2,
+		LeaderId:     2,
+		PrevLogIndex: 3, // This index is beyond the current log length
+		PrevLogTerm:  2,
+	}
+	replyShortLog := AppendEntriesReply{}
+	server.AppendEntries(argsShortLog, &replyShortLog)
+
+	if replyShortLog.Success {
+		t.Errorf("Expected AppendEntries to fail due to short log, but it succeeded")
+	}
+
+	//Scenario where the log has a term mismatch
+	argsTermMismatch := AppendEntriesArgs{
+		Term:         2,
+		LeaderId:     2,
+		PrevLogIndex: 1, // This index exists in the log
+		PrevLogTerm:  0, // This term does not match the term at index 1
+	}
+	replyTermMismatch := AppendEntriesReply{}
+	server.AppendEntries(argsTermMismatch, &replyTermMismatch)
+
+	if replyTermMismatch.Success {
+		t.Errorf("Expected AppendEntries to fail due to term mismatch, but it succeeded")
+	}
+
+	//Scenario where the log matches and new entries are appended
+	argsMatch := AppendEntriesArgs{
+		Term:         2,
+		LeaderId:     2,
+		PrevLogIndex: 1, // This index exists in the log
+		PrevLogTerm:  1, // This term matches the term at index 1
+		Entries: []LogEntry{
+			{Term: 3, Command: "z=15"},
+		},
+		LeaderCommit: 2,
+	}
+	replyMatch := AppendEntriesReply{}
+	server.AppendEntries(argsMatch, &replyMatch)
+
+	if !replyMatch.Success {
+		t.Errorf("Expected AppendEntries to succeed with matching log, but it failed")
+	}
+
+	//Check if the new entry was appended correctly
+	if len(server.log) != 3 {
+		t.Errorf("Expected log length to be 3 after appending, got %d", len(server.log))
+	}
+
+	if server.log[2].Command != "z=15" {
+		t.Errorf("Expected log entry at index 2 to be 'z=15', got %v", server.log[2].Command)
+	}
+
+	if server.commitIndex != 2 {
+		t.Errorf("Expected commit index to be updated to 2, got %d", server.commitIndex)
+	}
+
+}
