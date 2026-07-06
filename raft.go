@@ -82,8 +82,59 @@ func (s *Server) runElectionTimer() {
 func (s *Server) startElection() {
 	s.state = Candidate
 	s.currentTerm++
-	s.votedFor = 1 //Assuming this server's ID is 1 for simplicity
-	//Later on, we would send RequestVote RPCs to other servers and wait for votes
+	s.votedFor = s.serverId
+
+	votesReceived := 1 // Vote for self
+
+	//Args for the RequestVote RPC
+	args := RequestVoteArgs{
+		Term:        s.currentTerm,
+		CandidateId: s.serverId,
+	}
+
+	//Save the current term we are starting with so we can abort the election if we receive a higher term
+	savedCurrentTerm := s.currentTerm
+
+	//Loop through all peers and send them a RequestVote RPC
+	for _, peerId := range s.peerIds {
+		//Send the RequestVote RPC in a separate goroutine to avoid blocking for each peer
+		go func(peer int) {
+			reply := RequestVoteReply{}
+
+			// Simulate sending the RequestVote RPC to the peer
+			ok := s.sendRequestVote(peer, args, &reply)
+
+			if ok {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+
+				// If our state changed while waiting for the reply, we should ignore it
+				if s.state != Candidate || s.currentTerm != savedCurrentTerm {
+					return
+				}
+
+				//If the reply's term is greater than our current term, we need to step down to a follower
+				if reply.Term > s.currentTerm {
+					s.currentTerm = reply.Term
+					s.state = Follower
+					s.votedFor = -1
+					return
+				}
+
+				//If the vote was granted, increment the votes received
+				if reply.VoteGranted {
+					votesReceived++
+					//If we have received a majority of votes, become the leader
+					totalServers := len(s.peerIds) + 1
+					if votesReceived > totalServers/2 {
+						s.startLeader()
+					}
+				}
+			}
+		}(peerId)
+
+	}
+
 }
 
 // ReceiveHeartbeat to handle incoming heartbeats from the leader
@@ -142,4 +193,16 @@ func (s *Server) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) erro
 	reply.Term = s.currentTerm
 	return nil
 
+}
+
+func (s *Server) sendRequestVote(peerId int, args RequestVoteArgs, reply *RequestVoteReply) bool {
+	// Simulate sending the RequestVote RPC to the peer
+	// In a real implementation, this would involve network communication
+	// For testing purposes, we can assume the RPC is always successful
+	return true
+}
+
+func (s *Server) startLeader() {
+	s.state = Leader
+	// Additional logic for starting leader duties would go here (e.g., sending heartbeats)
 }
