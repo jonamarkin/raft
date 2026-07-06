@@ -90,3 +90,50 @@ func (s *Server) ReceiveHeartbeat(term int) {
 	s.state = Follower
 
 }
+
+//RPC Stuff
+
+// RequestVoteArgs represents the arguments for a RequestVote RPC
+type RequestVoteArgs struct {
+	Term        int
+	CandidateId int
+}
+
+// RequestVoteReply represents the reply for a RequestVote RPC
+type RequestVoteReply struct {
+	Term        int
+	VoteGranted bool
+}
+
+// RequestVote handles incoming RequestVote RPCs
+func (s *Server) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	//If the term in the request is less than the current term, reject the vote
+	if args.Term < s.currentTerm {
+		reply.Term = s.currentTerm
+		reply.VoteGranted = false
+		return nil
+	}
+
+	//If the term in the request is greater than the current term, update the current term and reset the vote
+	if args.Term > s.currentTerm {
+		s.currentTerm = args.Term
+		s.state = Follower
+		s.votedFor = -1
+	}
+
+	//If the server hasn't voted for anyone in this term, grant the vote
+	if s.votedFor == -1 || s.votedFor == args.CandidateId {
+		s.votedFor = args.CandidateId
+		reply.VoteGranted = true
+		s.lastContact = time.Now()
+	} else {
+		reply.VoteGranted = false
+	}
+
+	reply.Term = s.currentTerm
+	return nil
+
+}
