@@ -29,6 +29,16 @@ type Server struct {
 
 	//lastContact to keep track of the last time the server received a message from the leader
 	lastContact time.Time
+
+	log []LogEntry
+
+	//index of the highest log entry known to be committed
+	commitIndex int
+}
+
+type LogEntry struct {
+	Term    int
+	Command interface{}
 }
 
 // NewServer initializes a new node and starts its election timer
@@ -40,6 +50,9 @@ func NewServer(id int, peerIds []int) *Server {
 		currentTerm: 0,
 		votedFor:    -1,
 		lastContact: time.Now(),
+
+		log:         []LogEntry{{Term: 0, Command: nil}}, // Initialize with a dummy log entry at index 0
+		commitIndex: 0,
 	}
 
 	go s.runElectionTimer()
@@ -277,6 +290,13 @@ func (s *Server) broadcastHeartbeats() {
 type AppendEntriesArgs struct {
 	Term     int
 	LeaderId int
+
+	PrevLogIndex int
+	PrevLogTerm  int
+
+	Entries []LogEntry
+
+	LeaderCommit int
 }
 
 // AppendEntriesReply represents the reply for an AppendEntries RPC
@@ -290,6 +310,9 @@ func (s *Server) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	reply.Term = s.currentTerm
+	reply.Success = false
+
 	//If the leader has an older term than the current term, reject the heartbeat
 	if args.Term < s.currentTerm {
 		reply.Term = s.currentTerm
@@ -300,13 +323,56 @@ func (s *Server) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply
 	//If the leader has a newer term, update the current term and reset the vote
 	if args.Term > s.currentTerm {
 		s.currentTerm = args.Term
-		s.state = Follower
 		s.votedFor = -1
 	}
 
 	//Reset the timer and ensure we are in the follower state
 	s.lastContact = time.Now()
 	s.state = Follower
+
+	//Check  log consistency
+	if args.PrevLogIndex > len(s.log)-1 {
+		return nil
+	}
+
+	if s.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		return nil
+	}
+
+	//Append any new entries to the log by finding where the divergence occurs and replacing the existing entries with the new ones
+	insertIndex := args.PrevLogIndex + 1
+	newEntriesIndex := 0
+
+	//Find the point of divergence between the existing log and the new entries
+	for {
+		if insertIndex >= len(s.log) || newEntriesIndex >= len(args.Entries) {
+			break
+		}
+
+		if s.log[insertIndex].Term != args.Entries[newEntriesIndex].Term {
+			break
+		}
+
+		insertIndex++
+		newEntriesIndex++
+	}
+
+	//If there are new entries to append, truncate the existing log and append the new entries
+	if newEntriesIndex < len(args.Entries) {
+		s.log = s.log[:insertIndex]
+		s.log = append(s.log, args.Entries[newEntriesIndex:]...)
+	}
+
+	//Update the commit index if the leader's commit index is greater than the current commit index
+	if args.LeaderCommit > s.commitIndex {
+		lastNewEntryIndex := args.PrevLogIndex + len(args.Entries)
+
+		if args.LeaderCommit < lastNewEntryIndex {
+			s.commitIndex = args.LeaderCommit
+		} else {
+			s.commitIndex = lastNewEntryIndex
+		}
+	}
 
 	reply.Term = s.currentTerm
 	reply.Success = true
