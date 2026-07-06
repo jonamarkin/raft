@@ -71,3 +71,22 @@ func (s *Server) runElectionTimer() {
 		s.mu.Unlock()
 	}
 }
+
+// startElection to transition the server to a candidate state
+func (s *Server) startElection() {
+	s.state = Candidate
+	s.currentTerm++
+	s.votedFor = 1 //Assuming this server's ID is 1 for simplicity
+	//Later on, we would send RequestVote RPCs to other servers and wait for votes
+}
+
+// ReceiveHeartbeat to handle incoming heartbeats from the leader
+func (s *Server) ReceiveHeartbeat(term int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	//Reset the timer and ensure we are in the follower state
+	s.lastContact = time.Now()
+	s.state = Follower
+
+}
