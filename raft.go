@@ -19,6 +19,10 @@ const (
 type Server struct {
 	mu sync.Mutex
 
+	// Identity and routing
+	serverId int
+	peerIds  []int
+
 	state       State
 	currentTerm int
 	votedFor    int
@@ -28,8 +32,10 @@ type Server struct {
 }
 
 // NewServer initializes a new node and starts its election timer
-func NewServer() *Server {
+func NewServer(id int, peerIds []int) *Server {
 	s := &Server{
+		serverId:    id,
+		peerIds:     peerIds,
 		state:       Follower,
 		currentTerm: 0,
 		votedFor:    -1,

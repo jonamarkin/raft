@@ -6,7 +6,7 @@ import (
 )
 
 func TestElectionTimeout(t *testing.T) {
-	server := NewServer()
+	server := NewServer(1, []int{2, 3, 4})
 
 	// Wait for a duration longer than the maximum election timeout to ensure the server has time to become a candidate
 	time.Sleep(350 * time.Millisecond)
@@ -24,7 +24,7 @@ func TestElectionTimeout(t *testing.T) {
 }
 
 func TestHeartbeatResetsElectionTimer(t *testing.T) {
-	server := NewServer()
+	server := NewServer(1, []int{2, 3, 4})
 
 	//Send a heartbeat every 100ms
 	for i := 0; i < 5; i++ {
@@ -42,4 +42,59 @@ func TestHeartbeatResetsElectionTimer(t *testing.T) {
 	if server.currentTerm != 0 {
 		t.Errorf("Expected current term to be 0, got %d", server.currentTerm)
 	}
+}
+
+func TestRequestVote(t *testing.T) {
+	server := NewServer(1, []int{2, 3, 4})
+	server.currentTerm = 1
+
+	// Stop the election timer to prevent it from interfering with the test
+	server.mu.Lock()
+	server.lastContact = time.Now().Add(-time.Hour) // Simulate that the server hasn't heard from a leader for a long time
+	server.mu.Unlock()
+
+	//First scenario: Reject an outdated vote request
+	args1 := RequestVoteArgs{
+		Term:        0,
+		CandidateId: 2,
+	}
+	reply1 := RequestVoteReply{}
+	server.RequestVote(args1, &reply1)
+
+	if reply1.VoteGranted {
+		t.Errorf("Expected vote to be rejected for outdated term, but it was granted")
+	}
+
+	//Second scenario: Grant a vote for a new term
+	args2 := RequestVoteArgs{
+		Term:        2,
+		CandidateId: 3,
+	}
+	reply2 := RequestVoteReply{}
+	server.RequestVote(args2, &reply2)
+
+	if !reply2.VoteGranted {
+		t.Errorf("Expected vote to be granted for new term, but it was rejected")
+	}
+
+	if server.votedFor != 3 {
+		t.Errorf("Expected votedFor to be 3, got %d", server.votedFor)
+	}
+
+	//Third scenario: Reject a vote request from the same term after already voting
+	args3 := RequestVoteArgs{
+		Term:        2,
+		CandidateId: 4,
+	}
+	reply3 := RequestVoteReply{}
+	server.RequestVote(args3, &reply3)
+
+	if reply3.VoteGranted {
+		t.Errorf("Expected vote to be rejected for same term after already voting, but it was granted")
+	}
+
+	if server.votedFor != 3 {
+		t.Errorf("Expected votedFor to still be 3, got %d", server.votedFor)
+	}
+
 }
